@@ -34,6 +34,7 @@
     let renderTimer;
     let templatesReady = false;
     let croppedPhotoCanvas = null;
+    let portraitLinkBackgroundCanvas = null;
     let pendingPhotoName = '';
     const cropState = { image: null, zoom: 1, offsetX: 0, offsetY: 0, dragging: false, lastX: 0, lastY: 0 };
     const CROP_SIZE = 500;
@@ -68,7 +69,7 @@
     function cropMetrics() {
         const image = cropState.image;
         const diameter = CROP_RADIUS * 2;
-        const baseScale = Math.max(diameter / image.naturalWidth, diameter / image.naturalHeight);
+        const baseScale = Math.max((diameter + 4) / image.naturalWidth, (diameter + 4) / image.naturalHeight);
         const scale = baseScale * cropState.zoom;
         const width = image.naturalWidth * scale;
         const height = image.naturalHeight * scale;
@@ -148,6 +149,8 @@
         output.width = 700;
         output.height = 700;
         const ctx = output.getContext('2d');
+        ctx.fillStyle = '#e8edef';
+        ctx.fillRect(0, 0, output.width, output.height);
         const metrics = cropMetrics();
         const cropLeft = CROP_SIZE / 2 - CROP_RADIUS;
         const cropTop = CROP_SIZE / 2 - CROP_RADIUS;
@@ -165,13 +168,15 @@
     function drawSpeakerPhoto(ctx, format) {
         if (!croppedPhotoCanvas) return;
         const area = format === 'landscape'
-            ? { x: 437, y: 536, radius: 127 }
-            : { x: 543, y: 707, radius: 132 };
+            ? { x: 437, y: 536, radius: 137 }
+            : { x: 543, y: 707, radius: 142 };
         ctx.save();
         ctx.beginPath();
         ctx.arc(area.x, area.y, area.radius, 0, Math.PI * 2);
         ctx.clip();
-        ctx.drawImage(croppedPhotoCanvas, area.x - area.radius, area.y - area.radius, area.radius * 2, area.radius * 2);
+        ctx.fillStyle = '#e8edef';
+        ctx.fillRect(area.x - area.radius, area.y - area.radius, area.radius * 2, area.radius * 2);
+        ctx.drawImage(croppedPhotoCanvas, area.x - area.radius - 2, area.y - area.radius - 2, area.radius * 2 + 4, area.radius * 2 + 4);
         ctx.restore();
     }
 
@@ -380,6 +385,77 @@
         ctx.restore();
     }
 
+    function roundedRectangle(ctx, x, y, width, height, radius) {
+        const r = Math.min(radius, width / 2, height / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + width - r, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+        ctx.lineTo(x + width, y + height - r);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+        ctx.lineTo(x + r, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+    }
+
+    function portraitLinkBackground() {
+        if (portraitLinkBackgroundCanvas) return portraitLinkBackgroundCanvas;
+        const width = 730;
+        const height = 118;
+        const source = document.createElement('canvas');
+        source.width = portraitCanvas.width;
+        source.height = portraitCanvas.height;
+        const sourceContext = source.getContext('2d');
+        sourceContext.drawImage(templateImages.portrait, 0, 0);
+        const top = sourceContext.getImageData(180, 1164, width, 1).data;
+        const bottom = sourceContext.getImageData(180, 1282, width, 1).data;
+        const output = document.createElement('canvas');
+        output.width = width;
+        output.height = height;
+        const outputContext = output.getContext('2d');
+        const pixels = outputContext.createImageData(width, height);
+        for (let y = 0; y < height; y += 1) {
+            const mix = y / (height - 1);
+            for (let x = 0; x < width; x += 1) {
+                const sourceIndex = x * 4;
+                const targetIndex = (y * width + x) * 4;
+                pixels.data[targetIndex] = Math.round(top[sourceIndex] * (1 - mix) + bottom[sourceIndex] * mix);
+                pixels.data[targetIndex + 1] = Math.round(top[sourceIndex + 1] * (1 - mix) + bottom[sourceIndex + 1] * mix);
+                pixels.data[targetIndex + 2] = Math.round(top[sourceIndex + 2] * (1 - mix) + bottom[sourceIndex + 2] * mix);
+                pixels.data[targetIndex + 3] = 255;
+            }
+        }
+        outputContext.putImageData(pixels, 0, 0);
+        portraitLinkBackgroundCanvas = output;
+        return output;
+    }
+
+    function drawPortraitWebinarLink(ctx, link) {
+        // Replace the original boxed section with the clean treatment from the reference PDF.
+        ctx.drawImage(portraitLinkBackground(), 180, 1168);
+
+        ctx.save();
+        ctx.strokeStyle = '#ed1c24';
+        ctx.lineWidth = 2;
+        roundedRectangle(ctx, 222, 1196, 640, 64, 16);
+        ctx.stroke();
+
+        ctx.fillStyle = '#df111a';
+        roundedRectangle(ctx, 462, 1178, 162, 32, 4);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.font = fontString(25, 800, 'Arial Narrow, Arial, sans-serif');
+        ctx.fillText('Webinar Link:', 543, 1180);
+        ctx.restore();
+
+        drawFitted(ctx, link, 532, 1214, 525, 28, 16, { align: 'center', color: '#10131a', weight: 800, family: 'Arial Narrow, Arial, sans-serif' });
+        ctx.drawImage(templateImages.portrait, 800, 1204, 82, 62, 800, 1204, 82, 62);
+    }
+
     function drawLandscape(data) {
         const ctx = landscapeCanvas.getContext('2d');
         ctx.clearRect(0, 0, landscapeCanvas.width, landscapeCanvas.height);
@@ -414,7 +490,6 @@
         cleanArea(ctx, 240, 932, 620, 67);
         cleanArea(ctx, 314, 1065, 218, 78);
         cleanArea(ctx, 681, 1065, 170, 78);
-        cleanArea(ctx, 255, 1207, 545, 45);
 
         drawWrapped(ctx, `Topic: ${data.topic}`, 543, 443, 898, 35, 11, { align: 'center', boxHeight: 48, color: '#df0c16', maxLines: 3, maxHeight: 48, weight: 800, lineHeight: 1, family: 'Arial Narrow, Arial, sans-serif' });
         drawWrapped(ctx, data.speakerName, 543, 872, 520, 44, 14, { align: 'center', color: '#df0c16', maxLines: 2, maxHeight: 44, weight: 800, lineHeight: 1 });
@@ -425,7 +500,7 @@
         drawFitted(ctx, date.date, 319, 1105, 210, 27, 18, { color: '#050505', weight: 800 });
         drawFitted(ctx, 'Time:', 685, 1069, 160, 27, 20, { color: '#050505', weight: 800 });
         drawFitted(ctx, formattedTime(data.eventTime), 685, 1105, 160, 27, 18, { color: '#050505', weight: 800 });
-        drawFitted(ctx, data.webinarLink, 532, 1213, 525, 28, 16, { align: 'center', color: '#10131a', weight: 800, family: 'Arial Narrow, Arial, sans-serif' });
+        drawPortraitWebinarLink(ctx, data.webinarLink);
     }
 
     function setStatus(message, isError = false) {
